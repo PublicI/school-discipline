@@ -22,21 +22,23 @@ free_reduced_lunch <- read_csv("data/free_reduced_lunch.csv",
                                na = c("†", "–", "‡"),
                                col_types = cols(.default = "c",
                                                 `Total Students All Grades (Excludes AE) [Public School] 2017-18` = "n",
+                                                `Direct Certification [Public School] 2017-18` = "n",
                                                 `Free Lunch Eligible [Public School] 2017-18` = "n",
                                                 `Reduced-price Lunch Eligible Students [Public School] 2017-18` = "n",
                                                 `Free and Reduced Lunch Students [Public School] 2017-18` = "n")) %>% 
   rename("LEA_STATE_NAME" = 3,
-         "SCH_NAME" = 5,
-         "COMBOKEY" = 6,
-         "LEA_NAME" = 7,
-         "LEAID" = 8,
-         "ENROLLMENT_TOTAL_NCES" = 9,
-         "FREE_LUNCH" = 10,
+         "SCH_NAME" = 4,
+         "COMBOKEY" = 5,
+         "LEA_NAME" = 6,
+         "LEAID" = 7,
+         "ENROLLMENT_TOTAL_NCES" = 8,
+         "FREE_LUNCH" = 9,
+         "DIRECT_CERT_LUNCH" = 10,
          "REDUCED_PRICE_LUNCH" = 11,
          "FREE_AND_REDUCED_PRICE_LUNCH" = 12) %>% 
   mutate(across(where(is.character), ~str_replace_all(.x, '^="|"$', "")),
          across(where(is.numeric), formattable::comma, digits = 0)) %>% 
-  select(3, 8, 7, 5, 6, 9:12)
+  select(3, 7, 6, 4, 5, 8:12)
 
 # Join the data frames
 discipline <- list(enrollment, corporal_punishment, expulsions, referrals_arrests,
@@ -49,18 +51,29 @@ discipline <- list(enrollment, corporal_punishment, expulsions, referrals_arrest
   # Convert reserved values to 0 (I MAY WANT TO CHANGE THIS TO "NA" LATER)
   mutate(across(where(is.numeric), ~ifelse(. %in% c(-3, -5, -6, -8, -9, -11), 0, .)))
 
-# Test Alabama schools
+# Test DC schools
 discipline %>% 
-  filter(COMBOKEY == "010108001767") %>% 
+  filter(LEA_STATE_NAME == "DISTRICT OF COLUMBIA") %>% 
   View()
 
 # Calculate discipline by school
 discipline_by_school <- discipline %>% 
   mutate(
-    # Free or reduced lunch as a percent of total enrollment
+    # Create direct certification flag
+    DIRECT_CERT_FLAG = case_when(
+      !is.na(DIRECT_CERT_LUNCH) & is.na(FREE_AND_REDUCED_PRICE_LUNCH) ~ TRUE,
+      TRUE ~ FALSE),
+    # Set the free and reduced lunch column equal to direct certification where necessary
+    FREE_AND_REDUCED_PRICE_LUNCH = case_when(
+      !is.na(FREE_AND_REDUCED_PRICE_LUNCH)  ~ FREE_AND_REDUCED_PRICE_LUNCH,
+      is.na(FREE_AND_REDUCED_PRICE_LUNCH) ~ DIRECT_CERT_LUNCH),
+    # Calculate free or reduced lunch as a percent of total enrollment
+    PCT_DIRECT_CERT_LUNCH = DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_FREE_LUNCH = FREE_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_REDUCED_PRICE_LUNCH = REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
-    PCT_FREE_AND_REDUCED_PRICE_LUNCH = FREE_AND_REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+    PCT_FREE_AND_REDUCED_PRICE_LUNCH = case_when(
+      !is.na(FREE_AND_REDUCED_PRICE_LUNCH)  ~ FREE_AND_REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+      is.na(FREE_AND_REDUCED_PRICE_LUNCH) ~ DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES),
     # Total enrollment including all races and all disability statuses (not disabled + IDEA + 504)
     ENROLLMENT_TOTAL = rowSums(across(contains("TOT_ENR_"))),
     # Total referrals including all races and all disability statuses (not disabled + IDEA + 504)
@@ -123,8 +136,7 @@ discipline_by_school <- discipline %>%
     across(-starts_with("PCT") & ends_with("PER_THOUSAND"), ~ formattable::digits(.x, 1)),
     across(contains("PCT"), ~ formattable::percent(.x, 1))) %>% 
   # Reorder the columns
-  select(1:8,
-         701:707,
+  select(1:8, 706, 701, 703, 702, 704, 705, 707:710,
          starts_with("REFERRALS_") & ends_with("_PER_THOUSAND"),
          starts_with("REFERRALS_") & ends_with("_PCT"),
          starts_with("ENROLLMENT_") & ends_with("_PER_THOUSAND"),
@@ -152,10 +164,13 @@ discipline_nationally <- discipline_by_school %>%
                      starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
                      starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND")), sum, na.rm = TRUE)) %>% 
   mutate(
-    # Free or reduced lunch as a percent of total enrollment
+    # Calculate free or reduced lunch as a percent of total enrollment
+    PCT_DIRECT_CERT_LUNCH = DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_FREE_LUNCH = FREE_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_REDUCED_PRICE_LUNCH = REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
-    PCT_FREE_AND_REDUCED_PRICE_LUNCH = FREE_AND_REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+    PCT_FREE_AND_REDUCED_PRICE_LUNCH = case_when(
+      !is.na(FREE_AND_REDUCED_PRICE_LUNCH)  ~ FREE_AND_REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+      is.na(FREE_AND_REDUCED_PRICE_LUNCH) ~ DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES),
     # Calculate total refferals per thousand
     REFERRALS_TOTAL_PER_THOUSAND = REFERRALS_TOTAL / ENROLLMENT_TOTAL * 1000,
     # Calculate disabled referrals per thousand
@@ -209,10 +224,13 @@ discipline_by_state <- discipline_by_school %>%
                      starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
                      starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND")), sum, na.rm = TRUE)) %>% 
   mutate(
-    # Free or reduced lunch as a percent of total enrollment
+    # Calculate free or reduced lunch as a percent of total enrollment
+    PCT_DIRECT_CERT_LUNCH = DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_FREE_LUNCH = FREE_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_REDUCED_PRICE_LUNCH = REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
-    PCT_FREE_AND_REDUCED_PRICE_LUNCH = FREE_AND_REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+    PCT_FREE_AND_REDUCED_PRICE_LUNCH = case_when(
+      !is.na(FREE_AND_REDUCED_PRICE_LUNCH)  ~ FREE_AND_REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+      is.na(FREE_AND_REDUCED_PRICE_LUNCH) ~ DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES),
     # Calculate total refferals per thousand
     REFERRALS_TOTAL_PER_THOUSAND = REFERRALS_TOTAL / ENROLLMENT_TOTAL * 1000,
     # Calculate disabled referrals per thousand
@@ -260,17 +278,25 @@ discipline_by_state <- discipline_by_school %>%
          starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND"),
          ends_with("_LUNCH"))
 
-# Why do four states have zero free and reduced price lunch enrollments?
+# Test a state that uses direct certification
 discipline_by_state %>% 
-  filter(FREE_AND_REDUCED_PRICE_LUNCH == 0) %>% 
+  filter(LEA_STATE_NAME == "DISTRICT OF COLUMBIA") %>% 
   View()
 
 # Calculate discipline by district
 discipline_by_district <- discipline_by_school %>% 
   group_by(LEAID) %>% 
-  summarize(across(c(starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
-                     starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND")), sum)) %>% 
+  summarize(across(c(-starts_with("PCT_") & ends_with("_LUNCH"),
+                     starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
+                     starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND")), sum, na.rm = TRUE)) %>% 
   mutate(
+    # Calculate free or reduced lunch as a percent of total enrollment
+    PCT_DIRECT_CERT_LUNCH = DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES,
+    PCT_FREE_LUNCH = FREE_LUNCH / ENROLLMENT_TOTAL_NCES,
+    PCT_REDUCED_PRICE_LUNCH = REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+    PCT_FREE_AND_REDUCED_PRICE_LUNCH = case_when(
+      !is.na(FREE_AND_REDUCED_PRICE_LUNCH)  ~ FREE_AND_REDUCED_PRICE_LUNCH / ENROLLMENT_TOTAL_NCES,
+      is.na(FREE_AND_REDUCED_PRICE_LUNCH) ~ DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES),
     # Calculate total refferals per thousand
     REFERRALS_TOTAL_PER_THOUSAND = REFERRALS_TOTAL / ENROLLMENT_TOTAL * 1000,
     # Calculate disabled referrals per thousand
@@ -323,9 +349,15 @@ discipline_by_district <- discipline_by_school %>%
          starts_with("REFERRALS_") & ends_with("_PER_THOUSAND"),
          starts_with("REFERRALS_") & ends_with("_PCT"),
          starts_with("ENROLLMENT_") & ends_with("_PER_THOUSAND"),
-         starts_with("PCT_"),
+         starts_with("PCT_") & -ends_with("_LUNCH"),
          starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
-         starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND"))
+         starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND"),
+         ends_with("_LUNCH"))
+
+# Test Boston, MA
+discipline_by_district %>% 
+  filter(LEAID == "2502790") %>% 
+  View()
 
 ### ANALYSIS
 
