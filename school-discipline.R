@@ -366,21 +366,29 @@ discipline_by_district %>%
 
 # Correlations
 
-# Convert columns to numeric prior to running the regression analysis
-discipline_by_district_for_correlations <- discipline_by_district %>% 
-  # Replace NAs with zeros
-  mutate(across(everything(), ~replace_na(.x, 0)),
-         REFERRALS_TOTAL_PER_THOUSAND = as.numeric(REFERRALS_TOTAL_PER_THOUSAND),
-         PCT_FREE_AND_REDUCED_PRICE_LUNCH = as.numeric(PCT_FREE_AND_REDUCED_PRICE_LUNCH))
+# Remove INF values prior to running the correlation analysis
+discipline_by_district_inf_removed <- discipline_by_district %>% 
+  mutate(across(everything(), ~na_if(., Inf))) %>% 
+  select(1:3, 64, 4:12)
 
 # What's the correlation between free and reduced lunch and referrals to law enforcement?
-cor(discipline_by_district_for_correlations$REFERRALS_TOTAL_PER_THOUSAND,
-    discipline_by_district_for_correlations$PCT_FREE_AND_REDUCED_PRICE_LUNCH,
-    use = "pairwise.complete.obs")
-
-discipline_by_district %>% 
-  filter(is.na(PCT_FREE_AND_REDUCED_PRICE_LUNCH)) %>% 
+cor(discipline_by_district_inf_removed[4:13],
+    use = "pairwise.complete.obs") %>% 
   View()
+
+# Plot this
+pairs(discipline_by_district_inf_removed[4:13],
+      use = "pairwise.complete.obs") %>% 
+  View()
+
+# Regressions
+lm(formula = 
+     REFERRALS_TOTAL_PER_THOUSAND ~ PCT_FREE_AND_REDUCED_PRICE_LUNCH,
+   data = discipline_by_district_inf_removed)
+
+discipline_by_district_inf_removed_model <- lm(formula = REFERRALS_TOTAL_PER_THOUSAND ~ PCT_FREE_AND_REDUCED_PRICE_LUNCH, data = discipline_by_district_inf_removed)
+
+summary.data.frame(discipline_by_district_inf_removed_model)
 
 # What's the picture nationally?
 View(discipline_nationally)
