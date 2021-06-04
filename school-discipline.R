@@ -1,5 +1,8 @@
+install.packages("psych")
+
 library(formattable)
 library(tidyverse)
+library(psych)
 library(scales)
 
 # Import Department of Education data
@@ -360,6 +363,24 @@ discipline_by_district %>%
   View()
 
 ### ANALYSIS
+
+# Correlations
+
+# Convert columns to numeric prior to running the regression analysis
+discipline_by_district_for_correlations <- discipline_by_district %>% 
+  # Replace NAs with zeros
+  mutate(across(everything(), ~replace_na(.x, 0)),
+         REFERRALS_TOTAL_PER_THOUSAND = as.numeric(REFERRALS_TOTAL_PER_THOUSAND),
+         PCT_FREE_AND_REDUCED_PRICE_LUNCH = as.numeric(PCT_FREE_AND_REDUCED_PRICE_LUNCH))
+
+# What's the correlation between free and reduced lunch and referrals to law enforcement?
+cor(discipline_by_district_for_correlations$REFERRALS_TOTAL_PER_THOUSAND,
+    discipline_by_district_for_correlations$PCT_FREE_AND_REDUCED_PRICE_LUNCH,
+    use = "pairwise.complete.obs")
+
+discipline_by_district %>% 
+  filter(is.na(PCT_FREE_AND_REDUCED_PRICE_LUNCH)) %>% 
+  View()
 
 # What's the picture nationally?
 View(discipline_nationally)
