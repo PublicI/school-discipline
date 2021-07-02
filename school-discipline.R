@@ -17,6 +17,10 @@ referrals_arrests <- read_csv("data/Referrals_and_Arrests.csv")
 
 restraint_seclusion <- read_csv("data/Restraint_and_Seclusion.csv")
 
+school_characteristics <- read_csv("data/School_Characteristics.csv")
+
+school_support <- read_csv("data/School_Support.csv")
+
 suspensions <- read_csv("data/Suspensions.csv")
 
 free_reduced_lunch <- read_csv("data/free_reduced_lunch.csv",
@@ -45,23 +49,24 @@ free_reduced_lunch <- read_csv("data/free_reduced_lunch.csv",
 
 # Join the data frames
 discipline <- list(enrollment, corporal_punishment, expulsions, referrals_arrests,
-                   restraint_seclusion, suspensions, free_reduced_lunch) %>% 
+                   restraint_seclusion, school_characteristics, school_support, free_reduced_lunch) %>% 
   reduce(full_join, by = "COMBOKEY") %>% 
   # Drop duplicate columns
-  select(c(-contains(".y") & -contains(".x.x") & -contains(".x.x.x") & -matches("NAME$|ID$"))) %>% 
+  select(c(-contains(".y") & -contains(".x.x") & -contains(".x.x.x") & -matches("NAME$|ID$|STATE$|JJ$"))) %>% 
   # Rename columns
   rename_with(~str_replace(.x, ".x$", "")) %>% 
   # Convert reserved values to 0 (I MAY WANT TO CHANGE THIS TO "NA" LATER)
   mutate(across(where(is.numeric), ~ifelse(. %in% c(-3, -5, -6, -8, -9, -11), 0, .)))
 
-# Test DC schools
-discipline %>% 
-  filter(LEA_STATE_NAME == "DISTRICT OF COLUMBIA") %>% 
-  View()
-
 # Calculate discipline by school
 discipline_by_school <- discipline %>% 
+  rename(ALT_SCH = SCH_STATUS_ALT,
+         FTE_LEO = SCH_FTESECURITY_LEO) %>% 
   mutate(
+    # Convert the alternative school flag to numeric
+    ALT_SCH = case_when(
+      ALT_SCH == "Yes" ~ 1,
+      ALT_SCH == "No" ~ 0),
     # Create direct certification flag
     DIRECT_CERT_FLAG = case_when(
       !is.na(DIRECT_CERT_LUNCH) & is.na(FREE_AND_REDUCED_PRICE_LUNCH) ~ TRUE,
@@ -134,12 +139,14 @@ discipline_by_school <- discipline %>%
     PCT_DIFF_REFERRALS_TWO_OR_MORE_PER_THOUSAND = (REFERRALS_TWO_OR_MORE_PER_THOUSAND - REFERRALS_TOTAL_PER_THOUSAND) / REFERRALS_TOTAL_PER_THOUSAND,
     # Calculate enrollment per thousand
     across(starts_with("ENROLLMENT") & -ENROLLMENT_TOTAL, ~ . / ENROLLMENT_TOTAL * 1000, .names = "{.col}_PER_THOUSAND"),
+    # Calculate law enforcement FTEs per thousand students
+    FTE_LEO_PER_THOUSAND = FTE_LEO / ENROLLMENT_TOTAL * 1000,
     # Format the columns
     across(where(is.numeric), formattable::comma, digits = 0),
     across(-starts_with("PCT") & ends_with("PER_THOUSAND"), ~ formattable::digits(.x, 1)),
     across(contains("PCT"), ~ formattable::percent(.x, 1))) %>% 
   # Reorder the columns
-  select(1:8, 706, 701, 703, 702, 704, 705, 707:710,
+  select(2:8, 533, 541, 620, 553, 563:567, 558:562,
          starts_with("REFERRALS_") & ends_with("_PER_THOUSAND"),
          starts_with("REFERRALS_") & ends_with("_PCT"),
          starts_with("ENROLLMENT_") & ends_with("_PER_THOUSAND"),
@@ -149,7 +156,7 @@ discipline_by_school <- discipline %>%
 
 # Test how many schools have free and reduced lunch data
 discipline_by_school %>% 
-  filter(!is.na(FREE_AND_REDUCED_PRICE_LUNCH)) %>% 
+  filter(!is.na(PCT_FREE_AND_REDUCED_PRICE_LUNCH)) %>% 
   summarize(num = n())
 
 # Test how many schools have more than 100% of students qualified for free and reduced price lunch (should presumably be zero))
@@ -161,12 +168,23 @@ discipline_by_school %>%
 View(discipline_by_school %>% 
        filter(COMBOKEY == "481662001424"))
 
+discipline_by_school %>% 
+  summarize(sum(ALT_SCH, na.rm = TRUE))
+
+discipline_by_school %>% 
+  summarize(sum(ENROLLMENT_TOTAL[ALT_SCH == 1], na.rm = TRUE))
+
 # Calculate discipline nationally
 discipline_nationally <- discipline_by_school %>% 
-  summarize(across(c(-starts_with("PCT_") & ends_with("_LUNCH"),
+  summarize(ENROLLMENT_ALT_SCHOOLS = sum(ENROLLMENT_TOTAL[ALT_SCH == 1], na.rm = TRUE),
+            across(c(starts_with("ALT_"),
+                     starts_with("FTE_") & -ends_with("_PER_THOUSAND"),
+                     -starts_with("PCT_") & ends_with("_LUNCH"),
                      starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
                      starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND")), sum, na.rm = TRUE)) %>% 
   mutate(
+    # Calculate student enrolled in alternative schools as a percent of total enrollment
+    PCT_ENROLLMENT_ALT_SCHOOLS = ENROLLMENT_ALT_SCHOOLS / ENROLLMENT_TOTAL,
     # Calculate free or reduced lunch as a percent of total enrollment
     PCT_DIRECT_CERT_LUNCH = DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_FREE_LUNCH = FREE_LUNCH / ENROLLMENT_TOTAL_NCES,
@@ -207,6 +225,8 @@ discipline_nationally <- discipline_by_school %>%
     PCT_DIFF_REFERRALS_TWO_OR_MORE_PER_THOUSAND = (REFERRALS_TWO_OR_MORE_PER_THOUSAND - REFERRALS_TOTAL_PER_THOUSAND) / REFERRALS_TOTAL_PER_THOUSAND,
     # Calculate enrollment per thousand
     across(starts_with("ENROLLMENT") & -ENROLLMENT_TOTAL, ~ . / ENROLLMENT_TOTAL * 1000, .names = "{.col}_PER_THOUSAND"),
+    # Calculate law enforcement FTEs per thousand students
+    FTE_LEO_PER_THOUSAND = FTE_LEO / ENROLLMENT_TOTAL * 1000,
     # Format the columns
     across(where(is.numeric), formattable::comma, digits = 0),
     across(-starts_with("PCT") & ends_with("PER_THOUSAND"), ~ formattable::digits(.x, 1)),
@@ -218,15 +238,22 @@ discipline_nationally <- discipline_by_school %>%
          starts_with("PCT_") & -ends_with("_LUNCH"),
          starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
          starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND"),
+         starts_with("ALT_"),
+         starts_with("FTE_"),
          ends_with("_LUNCH"))
 
 # Calculate discipline by state
 discipline_by_state <- discipline_by_school %>% 
   group_by(LEA_STATE_NAME) %>% 
-  summarize(across(c(-starts_with("PCT_") & ends_with("_LUNCH"),
+  summarize(ENROLLMENT_ALT_SCHOOLS = sum(ENROLLMENT_TOTAL[ALT_SCH == 1], na.rm = TRUE),
+            across(c(starts_with("ALT_"),
+                     starts_with("FTE_") & -ends_with("_PER_THOUSAND"),
+                     -starts_with("PCT_") & ends_with("_LUNCH"),
                      starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
                      starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND")), sum, na.rm = TRUE)) %>% 
   mutate(
+    # Calculate student enrolled in alternative schools as a percent of total enrollment
+    PCT_ENROLLMENT_ALT_SCHOOLS = ENROLLMENT_ALT_SCHOOLS / ENROLLMENT_TOTAL,
     # Calculate free or reduced lunch as a percent of total enrollment
     PCT_DIRECT_CERT_LUNCH = DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_FREE_LUNCH = FREE_LUNCH / ENROLLMENT_TOTAL_NCES,
@@ -267,6 +294,8 @@ discipline_by_state <- discipline_by_school %>%
     PCT_DIFF_REFERRALS_TWO_OR_MORE_PER_THOUSAND = (REFERRALS_TWO_OR_MORE_PER_THOUSAND - REFERRALS_TOTAL_PER_THOUSAND) / REFERRALS_TOTAL_PER_THOUSAND,
     # Calculate enrollment per thousand
     across(starts_with("ENROLLMENT_") & -ENROLLMENT_TOTAL, ~ . / ENROLLMENT_TOTAL * 1000, .names = "{.col}_PER_THOUSAND"),
+    # Calculate law enforcement FTEs per thousand students
+    FTE_LEO_PER_THOUSAND = FTE_LEO / ENROLLMENT_TOTAL * 1000,
     # Format the columns
     across(where(is.numeric), formattable::comma, digits = 0),
     across(-starts_with("PCT") & ends_with("PER_THOUSAND"), ~ formattable::digits(.x, 1)),
@@ -279,7 +308,35 @@ discipline_by_state <- discipline_by_school %>%
          starts_with("PCT_") & -ends_with("_LUNCH"),
          starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
          starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND"),
+         starts_with("ALT_"),
+         starts_with("FTE_"),
          ends_with("_LUNCH"))
+
+# Test numbers for California
+discipline_by_state %>% 
+  filter(LEA_STATE_NAME == "CALIFORNIA") %>% 
+  select(FTE_LEO,
+         FTE_LEO_PER_THOUSAND,
+         ALT_SCH,
+         ENROLLMENT_TOTAL,
+         ENROLLMENT_ALT_SCHOOLS,
+         PCT_ENROLLMENT_ALT_SCHOOLS) %>% 
+  View()
+
+discipline_by_school %>% 
+  filter(LEA_STATE_NAME == "CALIFORNIA") %>% 
+  summarize(sum(FTE_LEO, na.rm = TRUE),
+            sum(ALT_SCH, na.rm = TRUE),
+            sum(ENROLLMENT_TOTAL, na.rm = TRUE),
+            n())
+
+discipline_by_school %>% 
+  filter(LEA_STATE_NAME == "CALIFORNIA") %>% 
+  summarize(sum(FTE_LEO, na.rm = TRUE),
+            sum(ALT_SCH, na.rm = TRUE),
+            sum(ENROLLMENT_TOTAL, na.rm = TRUE),
+            sum(ENROLLMENT_TOTAL[ALT_SCH == 1], na.rm = TRUE),
+            n())
 
 # Test a state that uses direct certification
 discipline_by_state %>% 
@@ -289,10 +346,15 @@ discipline_by_state %>%
 # Calculate discipline by district
 discipline_by_district <- discipline_by_school %>% 
   group_by(LEAID) %>% 
-  summarize(across(c(-starts_with("PCT_") & ends_with("_LUNCH"),
+  summarize(ENROLLMENT_ALT_SCHOOLS = sum(ENROLLMENT_TOTAL[ALT_SCH == 1], na.rm = TRUE),
+            across(c(starts_with("ALT_"),
+                     starts_with("FTE_") & -ends_with("_PER_THOUSAND"),
+                     -starts_with("PCT_") & ends_with("_LUNCH"),
                      starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
                      starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND")), sum, na.rm = TRUE)) %>% 
   mutate(
+    # Calculate student enrolled in alternative schools as a percent of total enrollment
+    PCT_ENROLLMENT_ALT_SCHOOLS = ENROLLMENT_ALT_SCHOOLS / ENROLLMENT_TOTAL,
     # Calculate free or reduced lunch as a percent of total enrollment
     PCT_DIRECT_CERT_LUNCH = DIRECT_CERT_LUNCH / ENROLLMENT_TOTAL_NCES,
     PCT_FREE_LUNCH = FREE_LUNCH / ENROLLMENT_TOTAL_NCES,
@@ -333,6 +395,8 @@ discipline_by_district <- discipline_by_school %>%
     PCT_DIFF_REFERRALS_TWO_OR_MORE_PER_THOUSAND = (REFERRALS_TWO_OR_MORE_PER_THOUSAND - REFERRALS_TOTAL_PER_THOUSAND) / REFERRALS_TOTAL_PER_THOUSAND,
     # Calculate enrollment per thousand
     across(starts_with("ENROLLMENT_") & -ENROLLMENT_TOTAL, ~ . / ENROLLMENT_TOTAL * 1000, .names = "{.col}_PER_THOUSAND"),
+    # Calculate law enforcement FTEs per thousand students
+    FTE_LEO_PER_THOUSAND = FTE_LEO / ENROLLMENT_TOTAL * 1000,
     # Format the columns
     across(where(is.numeric), formattable::comma, digits = 0),
     across(-starts_with("PCT") & ends_with("PER_THOUSAND"), ~ formattable::digits(.x, 1)),
@@ -355,33 +419,81 @@ discipline_by_district <- discipline_by_school %>%
          starts_with("PCT_") & -ends_with("_LUNCH"),
          starts_with("REFERRALS_") & -ends_with("_PER_THOUSAND"),
          starts_with("ENROLLMENT_") & -ends_with("_PER_THOUSAND"),
+         starts_with("ALT_"),
+         starts_with("FTE_"),
          ends_with("_LUNCH"))
 
 # Test Boston, MA
 discipline_by_district %>% 
   filter(LEAID == "2502790") %>% 
-  View()
+  select(FTE_LEO,
+         FTE_LEO_PER_THOUSAND,
+         ALT_SCH,
+         ENROLLMENT_TOTAL)
+
+discipline_by_school %>% 
+  filter(LEAID == "2502790") %>% 
+  summarize(sum(FTE_LEO, na.rm = TRUE),
+            sum(ALT_SCH, na.rm = TRUE),
+            sum(ENROLLMENT_TOTAL, na.rm = TRUE),
+            n())
 
 ### ANALYSIS
 
+discipline_by_state %>% 
+  arrange(desc(PCT_ENROLLMENT_ALT_SCHOOLS)) %>% 
+  View()
+
+# Do alternative schools have higher rates of referral than non-alternative schools?
+discipline_by_school %>% 
+  filter(ALT_SCH == 1) %>% 
+  summarize(sum(REFERRALS_TOTAL, na.rm = TRUE),
+            sum(ENROLLMENT_TOTAL, na.rm = TRUE))
+# 20.2 per thousand
+
+discipline_by_school %>% 
+  filter(ALT_SCH == 0) %>% 
+  summarize(sum(REFERRALS_TOTAL, na.rm = TRUE),
+            sum(ENROLLMENT_TOTAL, na.rm = TRUE))
+# 4.4 per thousand
+
 # Correlations
+
+which(names(discipline_by_school) == "FTE_LEO_PER_THOUSAND")
 
 # Remove INF values prior to running the correlation analysis
 discipline_by_district_inf_removed <- discipline_by_district %>% 
   mutate(across(everything(), ~na_if(., Inf))) %>% 
-  select(1:3, 64, 4:12)
+  select(1:3, 70, 31, 62, 4:12)
 
-# What's the correlation between free and reduced lunch and referrals to law enforcement?
-cor(discipline_by_district_inf_removed[4:13],
-    use = "pairwise.complete.obs") %>% 
-  View()
+discipline_by_school_inf_removed <- discipline_by_school %>% 
+  mutate(across(everything(), ~na_if(., Inf))) %>% 
+  select(1, 6, 5, 8, 16, 9:10, 22:30)
 
-# Plot this
-pairs(discipline_by_district_inf_removed[4:13],
-      use = "pairwise.complete.obs") %>% 
-  View()
+discipline_by_high_school_inf_removed <- discipline_by_school_inf_removed %>% 
+  filter(SCH_GRADE_G12 == "Yes")
+
+# What's the correlation between LEOs-per-thousand-students, free/reduced lunch, percent of students in alternatives schools and referrals to law enforcement?
+district_correlations <- data.frame(cor(discipline_by_district_inf_removed[4:15],
+    use = "pairwise.complete.obs"))
+
+school_correlations <- data.frame(cor(discipline_by_school_inf_removed[5:16],
+                                        use = "pairwise.complete.obs"))
+
+high_school_correlations <- data.frame(cor(discipline_by_high_school_inf_removed[5:16],
+                                      use = "pairwise.complete.obs"))
+
+write_csv(district_correlations,
+          "data/exported/district_correlations.csv")
+
+write_csv(school_correlations,
+          "data/exported/school_correlations.csv")
+
+write_csv(high_school_correlations,
+          "data/exported/high_school_correlations.csv")
 
 # Regressions
+# Free/reduced price lunch
 lm(formula = 
      REFERRALS_TOTAL_PER_THOUSAND ~ PCT_FREE_AND_REDUCED_PRICE_LUNCH,
    data = discipline_by_district_inf_removed)
@@ -389,6 +501,9 @@ lm(formula =
 discipline_by_district_inf_removed_model <- lm(formula = REFERRALS_TOTAL_PER_THOUSAND ~ PCT_FREE_AND_REDUCED_PRICE_LUNCH, data = discipline_by_district_inf_removed)
 
 summary.data.frame(discipline_by_district_inf_removed_model)
+
+# LEO-per-thousand-students
+cor(discipline_by_district_info_removed[])
 
 # What's the picture nationally?
 View(discipline_nationally)
