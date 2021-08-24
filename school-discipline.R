@@ -582,6 +582,10 @@ count(discipline_by_state %>%
 count(discipline_by_state %>% 
         filter(REFERRALS_HISPANIC_EXCL_504_PER_THOUSAND > REFERRALS_TOTAL_PER_THOUSAND))
 
+discipline_by_district %>% 
+  filter(str_detect(LEA_NAME, regex("Mobile County"))) %>% 
+  View()
+
 # Which states disproportionately refer White students?
 count(discipline_by_state %>% 
         filter(REFERRALS_WHITE_EXCL_504_PER_THOUSAND > REFERRALS_TOTAL_PER_THOUSAND))
@@ -613,6 +617,13 @@ count(discipline_by_school %>%
                REFERRALS_NATIVE_EXCL_504_PER_THOUSAND > REFERRALS_TOTAL_PER_THOUSAND)) /
   count(discipline_by_school %>% 
           filter(ENROLLMENT_NATIVE >= 10))
+
+# Take a deeper look at Native American referrals.
+discipline_by_state %>% 
+  mutate(PCT_DIFF = (REFERRALS_NATIVE_EXCL_504_PER_THOUSAND - REFERRALS_TOTAL_PER_THOUSAND) / REFERRALS_TOTAL_PER_THOUSAND) %>% 
+  select(LEA_STATE_NAME, ENROLLMENT_NATIVE, PCT_ENROLLMENT_NATIVE, PCT_DIFF, REFERRALS_NATIVE_EXCL_504_PER_THOUSAND, REFERRALS_TOTAL_PER_THOUSAND) %>%
+  arrange(desc(PCT_DIFF)) %>% 
+  View()
 
 # What about Vermont?
 discipline_by_state %>% 
